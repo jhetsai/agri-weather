@@ -101,7 +101,7 @@
         </div>
         
         <div class="chart-container">
-            <h3>📈 每小時預報（wttr.in）</h3>
+            <h3>📈 每小時預報（Open-Meteo）</h3>
             <canvas id="hourlyChart" height="200"></canvas>
         </div>
         
@@ -111,7 +111,7 @@
         </div>
         <div id="cwa-forecast"></div>
         
-        <div class="section-title">📅 wttr.in 3天預報（早/中/晚）</div>
+        <div class="section-title">📅 Open-Meteo 7天預報（早/中/晚）</div>
         <div id="om-forecast"></div>
         
         <div class="card">
@@ -119,13 +119,12 @@
             <div id="tips-container"></div>
         </div>
         
-        <div class="footer">氣象資料：CWA中央氣象局 + wttr.in｜本頁面每6小時自動更新</div>
+        <div class="footer">氣象資料：CWA中央氣象局 + Open-Meteo｜本頁面每6小時自動更新</div>
     </div>
     
     <script>
     let chart = null;
     const WX_ICON = {0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',51:'🌦️',53:'🌦️',55:'🌧️',61:'🌧️',63:'🌧️',65:'🌧️',71:'🌨️',73:'🌨️',75:'🌨️',80:'🌧️',81:'🌧️',82:'🌧️',85:'🌨️',86:'🌨️',95:'⛈️',96:'⛈️',99:'⛈️'};
-    const WX_WTTR={'Sunny':'☀️','Clear':'☀️','Partly Cloudy':'⛅','Cloudy':'☁️','Overcast':'☁️','Mist':'🌫️','Fog':'🌫️','Rain':'🌧️','Light Rain':'🌦️','Heavy Rain':'🌧️','Thunderstorm':'⛈️','Snow':'🌨️','Light Snow':'🌨️','Sleet':'🌨️','Light drizzle':'🌦️','Drizzle':'🌦️','Patchy rain possible':'🌦️','Blowing snow':'❄️','Blizzard':'❄️','Freezing drizzle':'🌨️','Heavy snow':'🌨️','Moderate or heavy rain shower':'🌧️','Light rain shower':'🌦️','Torrential rain shower':'🌧️','Moderate rain':'🌧️','Light rain at times':'🌦️','Heavy rain at times':'🌧️','Light freezing rain':'🌨️'};
     const WX_DESC = {0:'晴天',1:'晴時多雲',2:'多雲',3:'陰天',45:'有霧',48:'有霧',51:'局部陣雨',53:'局部陣雨',55:'陣雨',61:'小雨',63:'中雨',65:'大雨',71:'小雪',73:'中雪',75:'大雪',80:'局部陣雨',81:'陣雨',82:'強陣雨',85:'小陣雪',86:'大陣雪',95:'雷雨',96:'雷雨',99:'雷雨'};
     const DAY = ['週日','週一','週二','週三','週四','週五','週六'];
     const MONTH = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
@@ -153,39 +152,15 @@
     
     async function load() {
         try {
-            const wttrRes = await fetch('https://wttr.in/Shuilin,Taiwan?format=j1');
-            if(!wttrRes.ok) throw new Error('wttr.in 連線失敗');
-            const wt = await wttrRes.json();
+            const [obsRes, fcRes, omRes] = await Promise.all([
+                fetch('https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0001-001?Authorization=' + CWA_API + '&limit=200'),
+                fetch('https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001?Authorization=' + CWA_API),
+                fetch('https://api.open-meteo.com/v1/forecast?latitude=23.71&longitude=120.29&hourly=weathercode,temperature_2m,precipitation_probability,windspeed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia/Taipei&forecast_days=7')
+            ]);
             
-            // Build flat hourly arrays from wttr data
-            const omTimes = [];
-            const omTemp = [];
-            const omWind = [];
-            const omPop = [];
-            const omWx = []; // numeric code for WX_ICON
-            const descToCode = {
-                'Sunny':0,'Clear':0,'Partly Cloudy':2,'Cloudy':3,'Overcast':3,
-                'Mist':45,'Fog':45,'Rain':61,'Light Rain':55,'Heavy Rain':65,
-                'Thunderstorm':95,'Snow':71,'Light Snow':73,'Sleet':73,
-                'Light drizzle':53,'Drizzle':51,'Patchy rain possible':55,
-                'Blowing snow':75,'Blizzard':75,'Freezing drizzle':73,
-                'Heavy snow':75,'Moderate or heavy rain shower':81,
-                'Light rain shower':55,'Torrential rain shower':82,
-                'Moderate rain':63,'Light rain at times':55,'Heavy rain at times':65,
-                'Light freezing rain':73
-            };
-            wt.weather.slice(0,3).forEach(day => {
-                day.hourly.forEach(h => {
-                    const hour = parseInt(h.time);
-                    const dateStr = day.date + 'T' + String(hour).padStart(4,'0').slice(0,4) + ':00';
-                    omTimes.push(dateStr);
-                    omTemp.push(parseFloat(h.tempC));
-                    omWind.push(parseFloat(h.windspeedKmph));
-                    omPop.push(parseInt(h.chanceofrain)||0);
-                    const desc = h.weatherDesc[0].value;
-                    omWx.push(descToCode[desc]||0);
-                });
-            });
+            const obs = await obsRes.json();
+            const fc = await fcRes.json();
+            const om = await omRes.json();
             
             // CWA current
             const st = (obs.records.Station||[]).find(s=>s.StationName.includes('水林')||s.StationName.includes('虎尾')||s.StationName.includes('斗六'))||{};
@@ -226,7 +201,7 @@
             document.getElementById('rain-box').style.display = hasRain?'block':'none';
             document.getElementById('rain-list').innerHTML = rainHtml || '<div class="rain-row"><span class="desc">目前無明顯降雨</span></div>';
             
-            // wttr.in hourly data
+            // Open-Meteo data
             const omTimes = om.hourly.time;
             const omWx = om.hourly.weathercode;
             const omTemp = om.hourly.temperature_2m;
@@ -246,7 +221,7 @@
                 const rl=rainLevel(pv);
                 const start=fmtTime(wx?.startTime);
                 
-                // Match wind from wttr.in
+                // Match wind from Open-Meteo
                 let windSpeed = '--';
                 const cwaTime = new Date(wx?.startTime);
                 for(let j=0; j<omTimes.length && j<48; j++) {
@@ -286,42 +261,46 @@
                 options: { responsive: true, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'top' } }, scales: { yTemp: { type: 'linear', position: 'left', title: { display: true, text: '°C' }, grid: { drawOnChartArea: false } }, yPop: { type: 'linear', position: 'right', min: 0, max: 100, title: { display: true, text: '%' } } } }
             });
             
-            // wttr.in 3-day forecast
+            // Open-Meteo 7-day x 3 periods
             let omHtml='';
-            wt.weather.slice(0,3).forEach((day, dayIdx) => {
-                const d=new Date(day.date);
-                const maxT=parseFloat(day.maxtempC);
-                const minT=parseFloat(day.mintempC);
-                const dayPrecip=(parseFloat(day.hourly[0].precipInches)*25.4)||0;
-                const dayWx=omWx[dayIdx*24+4]||0;
+            const dailyData = {};
+            for(let i=0; i<omTimes.length; i++) {
+                const t=omTimes[i];
+                const day=t.includes('T')?t.split('T')[0]:t.split(' ')[0];
+                const hour=parseInt(t.includes('T')?t.split('T')[1].slice(0,2):t.split(' ')[1]?.slice(0,2));
+                if(!dailyData[day]) dailyData[day]={早:[],中:[],晚:[]};
+                if(hour>=6 && hour<12) dailyData[day].早.push(i);
+                else if(hour>=12 && hour<18) dailyData[day].中.push(i);
+                else dailyData[day].晚.push(i);
+            }
+            
+            Object.keys(dailyData).slice(0,7).forEach(day => {
+                const d=new Date(day);
+                const dayIdx=om.daily.time.indexOf(day);
+                const maxT=om.daily.temperature_2m_max[dayIdx];
+                const minT=om.daily.temperature_2m_min[dayIdx];
+                const noonIdx=dailyData[day].中[Math.floor(dailyData[day].中.length/2)]||dailyData[day].早[0]||0;
+                const dayWx=omWx[noonIdx]||0;
                 
-                omHtml+='<div class="day-card"><div class="day-header"><div class="date">'+MONTH[d.getMonth()]+d.getDate()+'日<div class="day">'+DAY[d.getDay()]+'</div></div><div class="wx-icon">'+(WX_ICON[dayWx]||'🌤️')+'</div><div class="wx-desc">'+(WX_DESC[dayWx]||'未知')+'</div><div class="temps"><div class="high">'+(maxT||0).toFixed(0)+'°</div><div class="low">'+(minT||0).toFixed(0)+'°</div></div></div>';
+                omHtml+=`<div class="day-card"><div class="day-header"><div class="date">${MONTH[d.getMonth()]}${d.getDate()}日<div class="day">${DAY[d.getDay()]}</div></div><div class="wx-icon">${WX_ICON[dayWx]||'🌤️'}</div><div class="wx-desc">${WX_DESC[dayWx]||'未知'}</div><div class="temps"><div class="high">${maxT?.toFixed(0)}°</div><div class="low">${minT?.toFixed(0)}°</div></div></div>`;
                 
-                const periods={早:[],中:[],晚:[]};
-                day.hourly.forEach((h,hi)=>{
-                    const t=parseInt(h.time);
-                    if(t>=600&&t<1200) periods.早.push(dayIdx*24+hi);
-                    else if(t>=1200&&t<1800) periods.中.push(dayIdx*24+hi);
-                    else if(t>=1800||t<600) periods.晚.push(dayIdx*24+hi);
-                });
-                const lblMap={早:'🌅 早晨',中:'☀️ 下午',晚:'🌙 夜間'};
-                ['早','中','晚'].forEach(p=>{
-                    const idxs=periods[p];
-                    if(idxs.length>0){
+                ['早','中','晚'].forEach((p,i) => {
+                    const idxs=dailyData[day][p];
+                    if(idxs.length>0) {
                         const idx=idxs[Math.floor(idxs.length/2)];
                         const rl=rainLevel(omPop[idx]||0);
                         const icons=WX_ICON[omWx[idx]]||'🌤️';
-                        omHtml+='<div class="period-row"><span class="period">'+lblMap[p]+'</span><span class="wx">'+icons+'</span><span class="desc">'+(omTemp[idx]||0).toFixed(0)+'°C</span><span class="level '+rl.cls+'">'+(rl.text==='高'?'🌧️🌧️':rl.text==='中'?'🌧️':rl.text==='低'?'🌦️':'☀️')+rl.text+'</span></div>';
+                        const lbl=p==='早'?'🌅 早晨':p==='中'?'☀️ 下午':'🌙 夜間';
+                        omHtml+=`<div class="period-row"><span class="period">${lbl}</span><span class="wx">${icons}</span><span class="desc">${omTemp[idx]?.toFixed(0)}°C</span><span class="level ${rl.cls}">${rl.text === '高' ? '🌧️🌧️' : rl.text === '中' ? '🌧️' : rl.text === '低' ? '🌦️' : '☀️'}${rl.text}</span></div>`;
                     }
                 });
-                if(dayPrecip>0) omHtml+='<div class="period-row"><span class="period">📊</span><span class="desc">預計總降雨量: <strong>'+dayPrecip.toFixed(1)+'mm</strong></span></div>';
                 omHtml+='</div>';
             });
             document.getElementById('om-forecast').innerHTML=omHtml;
             
             // Tips
-            const avgMin=(wt.weather.reduce((s,d)=>s+parseFloat(d.mintempC),0)/wt.weather.length)||0;
-            const avgPop=(wt.weather.reduce((s,d)=>s+Math.max(...d.hourly.map(h=>parseInt(h.chanceofrain)||0)),0)/wt.weather.length)||0;
+            const avgPop=om.daily.precipitation_probability_max.reduce((s,p)=>s+(p||0),0)/7;
+            const avgMin=om.daily.temperature_2m_min.reduce((s,p)=>s+(p||0),0)/7;
             let tips='';
             if(avgMin>=28) tips+=`<div class="tip-item"><div class="tip-icon">🌡️</div><div class="tip-text"><div class="title">溫度偏高（均溫${avgMin.toFixed(1)}°C）</div><div class="desc">建議清晨或傍晚農務</div></div></div>`;
             else if(avgMin<15) tips+=`<div class="tip-item"><div class="tip-icon">🌡️</div><div class="tip-text"><div class="title">溫度偏低（均溫${avgMin.toFixed(1)}°C）</div><div class="desc">注意作物保暖</div></div></div>`;
