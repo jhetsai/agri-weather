@@ -27,7 +27,7 @@
         .card h2 .sub { font-size: 0.8em; color: #888; font-weight: normal; }
         .card .error-msg { background: #fff3e0; border: 1px solid #ff9800; border-radius: 6px; padding: 8px 12px; color: #e65100; font-size: 0.85em; margin-top: 8px; }
         .card .partial { background: #e3f2fd; border: 1px solid #2196f3; border-radius: 6px; padding: 8px 12px; color: #1565c0; font-size: 0.85em; margin-top: 8px; }
-        .today-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        .today-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
         .today-item { background: #f8f9fa; border-radius: 8px; padding: 10px 6px; text-align: center; }
         .today-item .icon { font-size: 1.3em; }
         .today-item .label { font-size: 0.75em; color: #666; }
@@ -73,7 +73,7 @@
         .tip-text .title { font-weight: bold; color: #333; }
         .tip-text .desc { color: #666; font-size: 0.9em; }
         .footer { text-align: center; padding: 12px; color: rgba(255,255,255,0.7); font-size: 0.75em; }
-        @media (max-width: 600px) { .today-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 600px) { .today-grid { grid-template-columns: repeat(3, 1fr); } }
     </style>
 </head>
 <body>
@@ -90,16 +90,17 @@
         </div>
         
         <div class="card">
-            <h2>📍 水林鄉即時天氣 <span class="sub">（CWA 氣象局）</span></h2>
+            <h2>📍 水林鄉天氣 <span class="sub">（CWA 氣象局）</span></h2>
             <div id="cwa-error"></div>
             <div class="today-grid" id="cwa-grid">
                 <div class="today-item"><div class="icon">🌡️</div><div class="label">溫度</div><div class="value" id="t-temp">--°C</div></div>
+                <div class="today-item"><div class="icon">💧</div><div class="label">降雨量</div><div class="value" id="t-rain-mm">--mm</div></div>
                 <div class="today-item"><div class="icon">🌧️</div><div class="label">降雨機率</div><div class="value" id="t-rain">--</div></div>
-                <div class="today-item"><div class="icon">💧</div><div class="label">濕度</div><div class="value" id="t-humid">--%</div></div>
+                <div class="today-item"><div class="icon">💨</div><div class="label">濕度</div><div class="value" id="t-humid">--%</div></div>
                 <div class="today-item"><div class="icon">🌬️</div><div class="label">風速</div><div class="value" id="t-wind">-- m/s</div></div>
             </div>
             <div class="rain-box" id="rain-box" style="display:none">
-                <h4>🌧️ 18小時降雨預報（CWA）</h4>
+                <h4>🌧️ 18小時降雨預報</h4>
                 <div id="rain-list"></div>
             </div>
             <div id="cwa-forecast"></div>
@@ -139,12 +140,12 @@ function fmtTime(t){if(!t)return'--';const d=new Date(t.includes('T')?t:t.replac
 function fmtDay(d){return MONTH[d.getMonth()]+d.getDate()+'日';}
 
 function rainLevel(p){if(p>=70)return{text:'高',cls:'high'};if(p>=40)return{text:'中',cls:'med'};if(p>0)return{text:'低',cls:'low'};return{text:'無',cls:'none'};}
+function rainMmLevel(mm){if(mm>=25)return{text:'豪雨',cls:'danger'};if(mm>=10)return{text:'大雨',cls:'warning'};if(mm>=1)return{text:'小雨',cls:'low'};return{text:'無',cls:'none'};}
 function windLevel(s){if(s>=30)return{text:'強',cls:'high'};if(s>=15)return{text:'中',cls:'med'};return{text:'弱',cls:'low'};}
 
 let chart=null;
-let cwaLoaded=false, omLoaded=false, chartLoaded=false;
+let cwaLoaded=false, omLoaded=false;
 
-// 分開載入 CWA 資料
 async function loadCWA() {
     try {
         const [obsRes, fcRes] = await Promise.all([
@@ -157,25 +158,44 @@ async function loadCWA() {
         const obs = await obsRes.json();
         const fc = await fcRes.json();
         
-        const st = (obs.records.Station||[]).find(s=>s.StationName.includes('水林')||s.StationName.includes('虎尾')||s.StationName.includes('斗六'))||{};
+        // 找最近的觀測站（水林/虎尾/斗六/箔子寮/高鐵雲林）
+        const nearbyNames = ['箔子寮','高鐵雲林','雲林東勢','虎尾','斗六','水林'];
+        let st = {};
+        for(const s of (obs.records.Station||[])) {
+            if(nearbyNames.some(n=>s.StationName.includes(n))) {
+                st = s; break;
+            }
+        }
+        if(!st.StationName) st = (obs.records.Station||[])[0]||{};
+        
+        // 溫度、濕度
         document.getElementById('t-temp').textContent = (st.WeatherElement?.AirTemperature||'--') + '°C';
         document.getElementById('t-humid').textContent = (st.WeatherElement?.RelativeHumidity||'--') + '%';
         document.getElementById('t-wind').textContent = (st.WeatherElement?.WindSpeed||'--') + ' m/s';
         
+        // 實際降雨量 (mm)
+        const rainMm = parseFloat(st.WeatherElement?.Now?.Precipitation||'0');
+        const rlMm = rainMmLevel(rainMm);
+        document.getElementById('t-rain-mm').textContent = rainMm.toFixed(1) + 'mm';
+        document.getElementById('t-rain-mm').className = 'value ' + (rlMm.cls==='danger'?'danger':rlMm.cls==='warning'?'warning':rlMm.cls==='low'?'safe':'');
+        
+        // 預報降雨機率
         const loc = fc.records.location.find(l=>l.locationName.includes('雲林'));
         if(!loc) throw new Error('找不到雲林預報資料');
         const el={}; loc.weatherElement.forEach(e=>el[e.elementName]=e.time);
         
         const pop0 = parseInt(el.PoP[0]?.parameter?.parameterName)||0;
         const rl0 = rainLevel(pop0);
-        document.getElementById('t-rain').textContent = rl0.text;
+        document.getElementById('t-rain').textContent = pop0 + '%';
         document.getElementById('t-rain').className = 'value ' + (rl0.cls==='high'?'danger':rl0.cls==='med'?'warning':'safe');
         
+        // 警示
         const alertBox=document.getElementById('alert-box'), alertIcon=document.getElementById('alert-icon'), alertTitle=document.getElementById('alert-title');
         if(pop0>=70) { alertBox.className='alert danger'; alertIcon.textContent='🚫'; alertTitle.textContent='🚫 高降雨機率 '+pop0+'%'; }
         else if(pop0>=40) { alertBox.className='alert warning'; alertIcon.textContent='⚠️'; alertTitle.textContent='⚠️ 局部陣雨 '+pop0+'%'; }
         else { alertBox.className='alert safe'; alertIcon.textContent='✅'; alertTitle.textContent='✅ 天氣穩定'; }
         
+        // 18小時預報
         let rainHtml='', hasRain=false;
         for(let i=0;i<3;i++) {
             const wx=el.Wx[i], pop=el.PoP[i];
@@ -192,6 +212,7 @@ async function loadCWA() {
         document.getElementById('rain-box').style.display = hasRain?'block':'none';
         document.getElementById('rain-list').innerHTML = rainHtml || '<div class="rain-row"><span class="desc">目前無明顯降雨</span></div>';
         
+        // 預報卡片
         let cwaHtml='';
         for(let i=0;i<3;i++) {
             const wx=el.Wx[i]||el.Wx[0];
@@ -214,17 +235,15 @@ async function loadCWA() {
         document.getElementById('cwa-error').innerHTML='<div class="error-msg">⚠️ CWA 氣象局資料取得失敗：'+e.message+'</div>';
         document.getElementById('cwa-partial').innerHTML='部分資料來自 Open-Meteo（如下）';
         document.getElementById('cwa-partial').style.display='block';
-        // 用 Open-Meteo 補充基本天氣
         document.getElementById('alert-box').className='alert warning';
         document.getElementById('alert-icon').textContent='⚠️';
         document.getElementById('alert-title').textContent='部分資料無法取得';
     }
 }
 
-// 分開載入 Open-Meteo 資料
 async function loadOM() {
     try {
-        const omRes = await fetch('https://api.open-meteo.com/v1/forecast?latitude=23.71&longitude=120.29&hourly=weathercode,temperature_2m,precipitation_probability,windspeed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia/Taipei&forecast_days=7');
+        const omRes = await fetch('https://api.open-meteo.com/v1/forecast?latitude=23.71&longitude=120.29&hourly=weathercode,temperature_2m,precipitation_probability,precipitation,windspeed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum&timezone=Asia/Taipei&forecast_days=7');
         if(!omRes.ok) throw new Error('Open-Meteo 連線失敗');
         
         const om = await omRes.json();
@@ -232,6 +251,7 @@ async function loadOM() {
         const omWx = om.hourly.weathercode;
         const omTemp = om.hourly.temperature_2m;
         const omPop = om.hourly.precipitation_probability;
+        const omPrecip = om.hourly.precipitation;
         const omWind = om.hourly.windspeed_10m;
         
         // 7日預報
@@ -252,6 +272,7 @@ async function loadOM() {
             const dayIdx=om.daily.time.indexOf(day);
             const maxT=om.daily.temperature_2m_max[dayIdx];
             const minT=om.daily.temperature_2m_min[dayIdx];
+            const dayPrecip=om.daily.precipitation_sum?.[dayIdx];
             const noonIdx=dailyData[day].中[Math.floor(dailyData[day].中.length/2)]||dailyData[day].早[0]||0;
             const dayWx=omWx[noonIdx]||0;
             
@@ -264,22 +285,28 @@ async function loadOM() {
                     const rl=rainLevel(omPop[idx]||0);
                     const icons=WX_ICON[omWx[idx]]||'🌤️';
                     const lbl=p==='早'?'🌅 早晨':p==='中'?'☀️ 下午':'🌙 夜間';
+                    const precMm=omPrecip[idx]?.toFixed(1)||'0';
                     omHtml+=`<div class="period-row"><span class="period">${lbl}</span><span class="wx">${icons}</span><span class="desc">${omTemp[idx]?.toFixed(0)}°C</span><span class="level ${rl.cls}">${rl.text === '高' ? '🌧️🌧️' : rl.text === '中' ? '🌧️' : rl.text === '低' ? '🌦️' : '☀️'}${rl.text}</span></div>`;
                 }
             });
+            // 每日總降雨量
+            if(dayPrecip>0) {
+                omHtml+=`<div class="period-row"><span class="period">📊</span><span class="desc">預計總降雨量: <strong>${dayPrecip.toFixed(1)}mm</strong></span></div>`;
+            }
             omHtml+='</div>';
         });
         document.getElementById('om-forecast').innerHTML=omHtml;
         
         // 24小時圖表
         const now = new Date();
-        const labels = [], temps = [], pops = [];
+        const labels = [], temps = [], pops = [], precips = [];
         for(let i=0; i<Math.min(48, omTimes.length); i++) {
             const omDate = new Date(omTimes[i].includes('T') ? omTimes[i] : omTimes[i].replace(' ', 'T'));
             if(omDate >= now) {
                 labels.push(fmtTime(omTimes[i]));
                 temps.push(omTemp[i]);
                 pops.push(omPop[i]||0);
+                precips.push(omPrecip[i]||0);
                 if(labels.length >= 24) break;
             }
         }
@@ -296,7 +323,6 @@ async function loadOM() {
         });
         
         omLoaded=true;
-        chartLoaded=true;
         checkAllLoaded();
     } catch(e) {
         console.error('Open-Meteo error:', e);
@@ -317,7 +343,6 @@ function checkAllLoaded() {
 }
 
 function loadTips() {
-    // 簡化版建議（獨立運作）
     let tips='';
     tips+=`<div class="tip-item"><div class="tip-icon">🌱</div><div class="tip-text"><div class="title">病蟲害防治</div><div class="desc">潮濕防疫病，乾燥防紅蜘蛛</div></div></div>`;
     tips+=`<div class="tip-item"><div class="tip-icon">🛡️</div><div class="tip-text"><div class="title">葉面施肥</div><div class="desc">選清晨或傍晚，雨後待葉面乾燥</div></div></div>`;
@@ -325,7 +350,6 @@ function loadTips() {
     document.getElementById('tips-container').innerHTML=tips;
 }
 
-// 同時開始載入
 loadCWA();
 loadOM();
 </script>
